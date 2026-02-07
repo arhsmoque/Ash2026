@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="ms">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ASH 2026 Photo Book - LIVE & SHARED</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore-compat.js"></script>
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <style>
+        button { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+        input, button, textarea { font-size: 16px; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script>
+        const { useState, useEffect, useRef, useCallback } = React;
+        
+        const firebaseConfig = {
+            apiKey: "AIzaSyB8j-jHo2N341ieW4AVCdPL3ipn4Ss8sYQ",
+            authDomain: "ash-2026-photobook.firebaseapp.com",
+            projectId: "ash-2026-photobook",
+            storageBucket: "ash-2026-photobook.firebasestorage.app",
+            messagingSenderId: "328228907150",
+            appId: "1:328228907150:web:fb4d2780b40bb8403ec1df",
+            measurementId: "G-783K226XC4"
+        };
+        
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+        
+        const CLOUDINARY_CLOUD_NAME = 'dl5oqxuo1';
+        const CLOUDINARY_UPLOAD_PRESET = 'ash2026_upload';
+        
+        function ASH2026PhotoBook() {
+            const [entries, setEntries] = useState([]);
+            const [isLoading, setIsLoading] = useState(true);
+            const [syncStatus, setSyncStatus] = useState('Loading...');
+            const [showUploadModal, setShowUploadModal] = useState(false);
+            const [uploading, setUploading] = useState(false);
+            const [newEntry, setNewEntry] = useState({
+                uploaderName: '',
+                caption: '',
+                file: null,
+                mediaType: null
+            });
+            const fileInputRef = useRef(null);
+
+            useEffect(() => {
+                setSyncStatus('🔄 Loading memories...');
+                
+                const unsubscribe = db.collection('photobook')
+                    .orderBy('timestamp', 'desc')
+                    .onSnapshot((snapshot) => {
+                        const loadedEntries = [];
+                        snapshot.forEach((doc) => {
+                            loadedEntries.push({ id: doc.id, ...doc.data() });
+                        });
+                        setEntries(loadedEntries);
+                        setSyncStatus(`✅ ${loadedEntries.length} memories loaded`);
+                        setIsLoading(false);
+                    }, (error) => {
+                        console.error('Load error:', error);
+                        setSyncStatus('❌ Failed to load');
+                        setIsLoading(false);
+                    });
+                
+                return () => unsubscribe();
+            }, []);
+
+            const uploadToCloudinary = async (file) => {
+                const formData = new FormData();
+                formData.append('file', file);
+                formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
+
+                const response = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/auto/upload`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) throw new Error('Upload failed');
+                const data = await response.json();
+                return {
+                    url: data.secure_url,
+                    type: data.resource_type === 'video' ? 'video' : 'image'
+                };
+            };
+
+            const addEntry = async () => {
+                if (!newEntry.uploaderName.trim() || !newEntry.file) {
+                    alert('Sila masukkan nama dan pilih foto/video!');
+                    return;
+                }
+
+                setUploading(true);
+                setSyncStatus('⬆️ Uploading...');
+
+                try {
+                    const uploadResult = await uploadToCloudinary(newEntry.file);
+                    
+                    await db.collection('photobook').add({
+                        uploaderName: newEntry.uploaderName.trim(),
+                        caption: newEntry.caption.trim(),
+                        mediaUrl: uploadResult.url,
+                        mediaType: uploadResult.type,
+                        timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+                        likes: 0
+                    });
+
+                    setNewEntry({ uploaderName: '', caption: '', file: null, mediaType: null });
+                    setShowUploadModal(false);
+                    setSyncStatus('✅ Memory added!');
+                } catch (err) {
+                    console.error('Upload error:', err);
+                    setSyncStatus('❌ Upload failed');
+                    alert('Gagal upload: ' + err.message);
+                } finally {
+                    setUploading(false);
+                }
+            };
+
+            const deleteEntry = async (entryId) => {
+                if (!window.confirm('Padam memory ini?')) return;
+                try {
+                    await db.collection('photobook').doc(entryId).delete();
+                    setSyncStatus('✅ Memory deleted');
+                } catch (err) {
+                    alert('Gagal padam');
+                }
+            };
+
+            const likeEntry = async (entryId, currentLikes) => {
+                try {
+                    await db.collection('photobook').doc(entryId).update({
+                        likes: (currentLikes || 0) + 1
+                    });
+                } catch (err) {
+                    console.error('Like error:', err);
+                }
+            };
+
+            const handleFileSelect = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                if (file.size > 10 * 1024 * 1024) {
+                    alert('File terlalu besar! Max 10MB.');
+                    return;
+                }
+                setNewEntry({
+                    ...newEntry,
+                    file: file,
+                    mediaType: file.type.startsWith('video/') ? 'video' : 'image'
+                });
+            };
+
+            if (isLoading) {
+                return React.createElement('div', {
+                    className: 'min-h-screen flex items-center justify-center',
+                    style: { background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' }
+                }, React.createElement('div', { className: 'text-white text-2xl font-bold' }, '📸 Loading...'));
+            }
+
+            return React.createElement('div', {
+                className: 'min-h-screen p-4',
+                style: { background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' }
+            }, [
+                React.createElement('div', { key: 'container', className: 'max-w-6xl mx-auto' }, [
+                    React.createElement('div', {
+                        key: 'header',
+                        className: 'text-center mb-8 bg-white/10 backdrop-blur-sm rounded-3xl p-6 shadow-2xl border-2 border-yellow-400'
+                    }, [
+                        React.createElement('div', { key: 'title', className: 'flex items-center justify-center gap-3 mb-2' }, [
+                            React.createElement('span', { key: 's1', className: 'text-4xl' }, '⭐'),
+                            React.createElement('h1', {
+                                key: 'h1',
+                                className: 'text-4xl sm:text-5xl font-black text-white',
+                                style: { textShadow: '3px 3px 0px rgba(0,0,0,0.3)' }
+                            }, 'ASH 2026'),
+                            React.createElement('span', { key: 's2', className: 'text-4xl' }, '⭐')
+                        ]),
+                        React.createElement('p', { key: 'p1', className: 'text-yellow-200 font-bold text-xl mb-2' }, 'Family Day Photo Book'),
+                        React.createElement('p', { key: 'p2', className: 'text-white/80 text-sm' }, '7-8 Feb 2026 • Villa Zahra, A\'Famosa'),
+                        React.createElement('p', { key: 'count', className: 'text-white/90 font-semibold mt-3' }, `📸 ${entries.length} memories`)
+                    ]),
+
+                    React.createElement('div', {
+                        key: 'status',
+                        className: 'text-center mb-4 bg-white/10 backdrop-blur-sm rounded-xl p-3'
+                    }, React.createElement('p', { className: 'text-white/90 text-sm font-semibold' }, syncStatus)),
+
+                    React.createElement('div', {
+                        key: 'btns',
+                        className: 'flex gap-3 mb-6 flex-wrap justify-center'
+                    }, [
+                        React.createElement('button', {
+                            key: 'up',
+                            onClick: () => setShowUploadModal(true),
+                            className: 'px-6 py-3 bg-green-500 text-white rounded-xl font-bold shadow-lg active:scale-95 transition-transform'
+                        }, '📤 Upload'),
+                        React.createElement('button', {
+                            key: 'dl',
+                            onClick: () => {
+                                const html = `<!DOCTYPE html><html><head><style>body{font-family:Arial;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);padding:20px;margin:0}.container{max-width:1200px;margin:0 auto}.header{text-align:center;color:white;margin-bottom:30px}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:20px}.card{background:white;border-radius:15px;overflow:hidden;box-shadow:0 10px 30px rgba(0,0,0,0.3)}.card img,.card video{width:100%;height:300px;object-fit:cover}.card-content{padding:15px}.uploader{font-weight:bold;color:#667eea}.likes{color:#e74c3c;font-weight:bold}</style></head><body><div class="container"><div class="header"><h1>⭐ ASH 2026 ⭐</h1><h2>Family Day Photo Book</h2><p>${entries.length} memories</p></div><div class="grid">${entries.map(e=>`<div class="card">${e.mediaType==='video'?`<video src="${e.mediaUrl}" controls></video>`:`<img src="${e.mediaUrl}" />`}<div class="card-content"><span class="uploader">📸 ${e.uploaderName}</span>${e.caption?`<p>${e.caption}</p>`:''}<p class="likes">❤️ ${e.likes||0}</p></div></div>`).join('')}</div></div></body></html>`;
+                                const blob = new Blob([html], {type:'text/html'});
+                                const url = URL.createObjectURL(blob);
+                                const a = document.createElement('a');
+                                a.href = url;
+                                a.download = `ASH2026-PhotoBook-${new Date().toISOString().split('T')[0]}.html`;
+                                a.click();
+                                URL.revokeObjectURL(url);
+                            },
+                            className: 'px-6 py-3 bg-purple-600 text-white rounded-xl font-bold shadow-lg active:scale-95 transition-transform'
+                        }, '📥 Download')
+                    ]),
+
+                    entries.length === 0 ? React.createElement('div', {
+                        key: 'empty',
+                        className: 'text-center text-white py-20'
+                    }, [
+                        React.createElement('div', { key: 'i', className: 'text-6xl mb-4' }, '📸'),
+                        React.createElement('p', { key: 't1', className: 'text-xl font-bold' }, 'Belum ada memories lagi'),
+                        React.createElement('p', { key: 't2', className: 'text-white/70' }, 'Jadi yang pertama upload!')
+                    ]) : null,
+
+                    React.createElement('div', {
+                        key: 'grid',
+                        className: 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6'
+                    }, entries.map((entry) => React.createElement('div', {
+                        key: entry.id,
+                        className: 'bg-white rounded-2xl overflow-hidden shadow-xl hover:shadow-2xl transition-all transform hover:scale-[1.02]'
+                    }, [
+                        React.createElement('div', {
+                            key: 'media',
+                            className: 'relative bg-gray-100',
+                            style: { height: '300px' }
+                        }, [
+                            entry.mediaType === 'video' ? 
+                                React.createElement('video', { key: 'v', src: entry.mediaUrl, controls: true, className: 'w-full h-full object-cover' }) :
+                                React.createElement('img', { key: 'i', src: entry.mediaUrl, className: 'w-full h-full object-cover' }),
+                            React.createElement('button', {
+                                key: 'd',
+                                onClick: () => deleteEntry(entry.id),
+                                className: 'absolute top-2 right-2 bg-red-500 text-white p-2 rounded-full shadow-lg active:scale-95'
+                            }, '🗑️')
+                        ]),
+                        React.createElement('div', { key: 'c', className: 'p-4' }, [
+                            React.createElement('div', { key: 'm', className: 'flex items-center justify-between mb-3' }, [
+                                React.createElement('span', { key: 'u', className: 'font-bold text-purple-700' }, `👤 ${entry.uploaderName}`),
+                                React.createElement('span', { key: 't', className: 'text-sm text-gray-500' }, entry.timestamp ? new Date(entry.timestamp.toDate()).toLocaleDateString('ms-MY') : '')
+                            ]),
+                            entry.caption ? React.createElement('p', { key: 'cap', className: 'text-gray-700 mb-3 text-sm' }, entry.caption) : null,
+                            React.createElement('button', {
+                                key: 'l',
+                                onClick: () => likeEntry(entry.id, entry.likes),
+                                className: 'text-red-500 font-bold flex items-center gap-2'
+                            }, `❤️ ${entry.likes || 0}`)
+                        ])
+                    ]))),
+
+                    showUploadModal ? React.createElement('div', {
+                        key: 'modal',
+                        className: 'fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50'
+                    }, React.createElement('div', { className: 'bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl' }, [
+                        React.createElement('div', { key: 'h', className: 'flex justify-between items-center mb-4' }, [
+                            React.createElement('h3', { className: 'text-2xl font-black text-purple-700' }, 'Upload Memory'),
+                            React.createElement('button', {
+                                onClick: () => { setShowUploadModal(false); setNewEntry({ uploaderName: '', caption: '', file: null, mediaType: null }); },
+                                className: 'text-gray-500 text-2xl font-bold'
+                            }, '✕')
+                        ]),
+                        React.createElement('div', { key: 'f', className: 'space-y-4' }, [
+                            React.createElement('input', {
+                                type: 'text',
+                                value: newEntry.uploaderName,
+                                onChange: (e) => setNewEntry({ ...newEntry, uploaderName: e.target.value }),
+                                placeholder: 'Nama Anda',
+                                className: 'w-full px-4 py-2 border-2 border-purple-300 rounded-lg'
+                            }),
+                            React.createElement('textarea', {
+                                value: newEntry.caption,
+                                onChange: (e) => setNewEntry({ ...newEntry, caption: e.target.value }),
+                                placeholder: 'Caption (optional)',
+                                className: 'w-full px-4 py-2 border-2 border-purple-300 rounded-lg',
+                                rows: 3
+                            }),
+                            React.createElement('input', {
+                                ref: fileInputRef,
+                                type: 'file',
+                                accept: 'image/*,video/*',
+                                onChange: handleFileSelect,
+                                className: 'hidden'
+                            }),
+                            React.createElement('button', {
+                                onClick: () => fileInputRef.current?.click(),
+                                className: 'w-full px-4 py-3 border-2 border-dashed border-purple-300 rounded-lg font-bold text-purple-700'
+                            }, newEntry.file ? `✅ ${newEntry.file.name}` : '📤 Select File (Max 10MB)'),
+                            newEntry.file && newEntry.mediaType === 'image' ? React.createElement('img', {
+                                src: URL.createObjectURL(newEntry.file),
+                                className: 'w-full h-40 object-cover rounded-lg'
+                            }) : null,
+                            React.createElement('button', {
+                                onClick: addEntry,
+                                disabled: uploading,
+                                className: 'w-full px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-xl font-bold disabled:opacity-50'
+                            }, uploading ? '⬆️ Uploading...' : '📤 Upload')
+                        ])
+                    ])) : null
+                ])
+            ]);
+        }
+
+        const root = ReactDOM.createRoot ? ReactDOM.createRoot(document.getElementById('root')) : ReactDOM;
+        if (root.render) root.render(React.createElement(ASH2026PhotoBook));
+        else ReactDOM.render(React.createElement(ASH2026PhotoBook), document.getElementById('root'));
+    </script>
+</body>
+</html>
