@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="ms">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ASH 2026 Scoreboard - Universal</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <style>
+        @keyframes pulse-glow {
+            0%, 100% { box-shadow: 0 0 20px rgba(0, 255, 0, 0.5); }
+            50% { box-shadow: 0 0 30px rgba(0, 255, 0, 0.8); }
+        }
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+        .live-dot {
+            animation: blink 1.5s infinite;
+        }
+        .live-indicator {
+            animation: pulse-glow 2s infinite;
+        }
+        /* iPad specific fixes */
+        button {
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
+        }
+        input, button {
+            font-size: 16px; /* Prevents zoom on focus in iOS */
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useCallback } = React;
+
+        // ==========================================
+        // UNIVERSAL STORAGE WRAPPER - iPad Hardened
+        // ==========================================
+        class UniversalStorage {
+            constructor() {
+                this.mode = 'memory';
+                this.memoryStorage = {};
+                this.storageAvailable = false;
+                this.detectStorage();
+            }
+
+            detectStorage() {
+                try {
+                    // Test localStorage by actually writing to it
+                    // This catches Safari Private Browsing QuotaExceededError
+                    const testKey = '__storage_test__';
+                    window.localStorage.setItem(testKey, '1');
+                    window.localStorage.removeItem(testKey);
+                    this.storageAvailable = true;
+                    this.mode = 'local';
+                    console.log('✅ localStorage available');
+                } catch (e) {
+                    // Safari Private Browsing throws QuotaExceededError here
+                    console.warn('⚠️ localStorage not available:', e.message);
+                    this.storageAvailable = false;
+                    this.mode = 'memory';
+                }
+            }
+
+            get(key) {
+                try {
+                    if (this.mode === 'local' && this.storageAvailable) {
+                        const value = window.localStorage.getItem(key);
+                        return value ? { key, value } : null;
+                    } else {
+                        const value = this.memoryStorage[key];
+                        return value ? { key, value } : null;
+                    }
+                } catch (error) {
+                    console.error('GET error:', error);
+                    // Fallback to memory on error
+                    const value = this.memoryStorage[key];
+                    return value ? { key, value } : null;
+                }
+            }
+
+            set(key, value) {
+                try {
+                    if (this.mode === 'local' && this.storageAvailable) {
+                        window.localStorage.setItem(key, value);
+                        return { key, value };
+                    } else {
+                        this.memoryStorage[key] = value;
+                        return { key, value };
+                    }
+                } catch (error) {
+                    // If localStorage fails (e.g. quota exceeded), fallback to memory
+                    console.error('SET error, falling back to memory:', error);
+                    this.mode = 'memory';
+                    this.storageAvailable = false;
+                    this.memoryStorage[key] = value;
+                    return { key, value };
+                }
+            }
+        }
+
+        // Initialize storage
+        const storage = new UniversalStorage();
+
+        // ==========================================
+        // MAIN SCOREBOARD COMPONENT
+        // ==========================================
+        function ASH2026Scoreboard() {
+            const [teams, setTeams] = useState([]);
+            const [editMode, setEditMode] = useState(false);
+            const [isLoading, setIsLoading] = useState(true);
+            const [error, setError] = useState(null);
+
+            const STORAGE_KEY = 'ash2026-scoreboard-data';
+
+            const defaultTeams = [
+                { id: 1, name: 'Team Pak Mok 🦅', color: '#4169E1', score: 0 },
+                { id: 2, name: 'Team Anjang 🦁', color: '#FFD700', score: 0 },
+                { id: 3, name: 'Team Mak Teh 🐯', color: '#FF6B6B', score: 0 },
+                { id: 4, name: 'Team Asilah 🦊', color: '#4ECDC4', score: 0 },
+                { id: 5, name: 'Team Diyana 🦺', color: '#95E1D3', score: 0 },
+                { id: 6, name: 'Team Fi Ali 🦌', color: '#F38181', score: 0 },
+                { id: 7, name: 'Team Pak Tam 🐻', color: '#AA96DA', score: 0 }
+            ];
+
+            const loadScoreboard = useCallback(() => {
+                try {
+                    const result = storage.get(STORAGE_KEY);
+                    
+                    if (result && result.value) {
+                        try {
+                            const parsedTeams = JSON.parse(result.value);
+                            if (Array.isArray(parsedTeams) && parsedTeams.length > 0) {
+                                setTeams(parsedTeams);
+                            } else {
+                                setTeams(defaultTeams);
+                            }
+                        } catch (parseErr) {
+                            console.error('Parse error:', parseErr);
+                            setTeams(defaultTeams);
+                        }
+                    } else {
+                        console.log('No saved data, using defaults');
+                        setTeams(defaultTeams);
+                        // Save defaults immediately
+                        storage.set(STORAGE_KEY, JSON.stringify(defaultTeams));
+                    }
+                    setError(null);
+                } catch (err) {
+                    console.error('Load error:', err);
+                    setTeams(defaultTeams);
+                } finally {
+                    setIsLoading(false);
+                }
+            }, []);
+
+            const saveScoreboard = useCallback((teamsData) => {
+                try {
+                    storage.set(STORAGE_KEY, JSON.stringify(teamsData));
+                    setError(null);
+                } catch (err) {
+                    console.error('Save error:', err);
+                    setError('Save failed');
+                }
+            }, []);
+
+            // Initial load
+            useEffect(() => {
+                loadScoreboard();
+            }, [loadScoreboard]);
+
+            const addPoints = (id, points) => {
+                const newTeams = teams.map(team => 
+                    team.id === id ? { ...team, score: Math.max(0, team.score + points) } : team
+                );
+                setTeams(newTeams);
+                saveScoreboard(newTeams);
+            };
+
+            const updateTeamName = (id, name) => {
+                const newTeams = teams.map(team =>
+                    team.id === id ? { ...team, name } : team
+                );
+                setTeams(newTeams);
+                saveScoreboard(newTeams);
+            };
+
+            const updateTeamColor = (id, color) => {
+                const newTeams = teams.map(team =>
+                    team.id === id ? { ...team, color } : team
+                );
+                setTeams(newTeams);
+                saveScoreboard(newTeams);
+            };
+
+            const removeTeam = (id) => {
+                // Use custom confirm for better iPad compatibility
+                if (window.confirm('Buang team ini?')) {
+                    const newTeams = teams.filter(t => t.id !== id);
+                    setTeams(newTeams);
+                    saveScoreboard(newTeams);
+                }
+            };
+
+            const addNewTeam = () => {
+                const newId = Math.max(...teams.map(t => t.id), 0) + 1;
+                const colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8', '#F7DC6F', '#BB8FCE'];
+                const randomColor = colors[Math.floor(Math.random() * colors.length)];
+                
+                const newTeams = [...teams, {
+                    id: newId,
+                    name: `Team Baru ${newId}`,
+                    color: randomColor,
+                    score: 0
+                }];
+                setTeams(newTeams);
+                saveScoreboard(newTeams);
+                setEditMode(true);
+            };
+
+            const resetScores = () => {
+                if (window.confirm('Reset semua skor ke 0?')) {
+                    const newTeams = teams.map(team => ({ ...team, score: 0 }));
+                    setTeams(newTeams);
+                    saveScoreboard(newTeams);
+                }
+            };
+
+            if (isLoading) {
+                return (
+                    <div className="min-h-screen flex items-center justify-center" style={{
+                        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
+                    }}>
+                        <div className="text-white text-2xl font-bold">🔄 Loading...</div>
+                    </div>
+                );
+            }
+
+            const sortedTeams = [...teams].sort((a, b) => b.score - a.score);
+            const maxScore = Math.max(...teams.map(t => t.score), 1);
+
+            return (
+                <div className="min-h-screen p-4 sm:p-6" style={{
+                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
+                }}>
+                    <div className="max-w-4xl mx-auto">
+                        <div className="relative text-center mb-8 bg-white/10 backdrop-blur-sm rounded-3xl p-6 shadow-2xl border-2 border-yellow-400">
+                            <div className="flex items-center justify-center gap-3 mb-2">
+                                <span className="text-4xl">⭐</span>
+                                <h1 className="text-4xl sm:text-5xl font-black text-white" style={{
+                                    textShadow: '3px 3px 0px rgba(0,0,0,0.3), -1px -1px 0px #FFD700'
+                                }}>
+                                    ASH 2026
+                                </h1>
+                                <span className="text-4xl">⭐</span>
+                            </div>
+                            <p className="text-yellow-200 font-bold text-lg">Family Day Scoreboard</p>
+                            <p className="text-white/80 text-sm">7-8 Feb 2026 • Villa Zahra, A'Famosa</p>
+                        </div>
+
+                        {error && (
+                            <div className="bg-red-500/80 text-white p-3 rounded-xl mb-4 text-center font-bold text-sm">
+                                {error}
+                            </div>
+                        )}
+
+                        <div className="flex gap-3 mb-6 flex-wrap justify-center">
+                            <button
+                                onClick={loadScoreboard}
+                                className="px-4 py-3 bg-blue-400 text-gray-900 rounded-xl font-bold shadow-lg transition-transform active:scale-95"
+                                style={{WebkitTapHighlightColor: 'transparent'}}
+                            >
+                                🔄 Refresh
+                            </button>
+                            <button
+                                onClick={() => setEditMode(!editMode)}
+                                className="px-4 py-3 rounded-xl font-bold shadow-lg transition-transform active:scale-95"
+                                style={{
+                                    background: editMode ? '#4ECDC4' : '#FFD700',
+                                    color: '#1a1a2e',
+                                    WebkitTapHighlightColor: 'transparent'
+                                }}
+                            >
+                                ⚙️ {editMode ? '✓ Selesai' : 'Edit'}
+                            </button>
+                            <button
+                                onClick={resetScores}
+                                className="px-4 py-3 bg-red-500 text-white rounded-xl font-bold shadow-lg transition-transform active:scale-95"
+                                style={{WebkitTapHighlightColor: 'transparent'}}
+                            >
+                                🔄 Reset
+                            </button>
+                            <button
+                                onClick={addNewTeam}
+                                className="px-4 py-3 bg-purple-600 text-white rounded-xl font-bold shadow-lg transition-transform active:scale-95"
+                                style={{WebkitTapHighlightColor: 'transparent'}}
+                            >
+                                ➕ Team
+                            </button>
+                        </div>
+
+                        <div className="space-y-4">
+                            {sortedTeams.map((team, index) => {
+                                const rankColor = index === 0 ? '#FFD700' : 
+                                                 index === 1 ? '#C0C0C0' : 
+                                                 index === 2 ? '#CD7F32' : team.color;
+                                const rankDisplay = index === 0 ? '🏆' : index + 1;
+
+                                return (
+                                    <div
+                                        key={team.id}
+                                        className="bg-white rounded-2xl shadow-xl overflow-hidden transform transition-all active:scale-95"
+                                        style={{ 
+                                            border: `3px solid ${team.color}`,
+                                            WebkitTapHighlightColor: 'transparent'
+                                        }}
+                                    >
+                                        <div className="p-4">
+                                            <div className="flex items-center gap-3 mb-3">
+                                                <div
+                                                    className="w-12 h-12 rounded-full flex items-center justify-center font-black text-xl shadow-lg flex-shrink-0"
+                                                    style={{
+                                                        background: rankColor,
+                                                        color: 'white',
+                                                        textShadow: '1px 1px 2px rgba(0,0,0,0.3)'
+                                                    }}
+                                                >
+                                                    {rankDisplay}
+                                                </div>
+
+                                                <div className="flex-1 min-w-0">
+                                                    {editMode ? (
+                                                        <div className="space-y-2">
+                                                            <input
+                                                                type="text"
+                                                                value={team.name}
+                                                                onChange={(e) => updateTeamName(team.id, e.target.value)}
+                                                                className="w-full px-3 py-2 border-2 rounded-lg font-bold text-lg"
+                                                                style={{ borderColor: team.color }}
+                                                            />
+                                                            <div className="flex gap-2 items-center flex-wrap">
+                                                                <input
+                                                                    type="color"
+                                                                    value={team.color}
+                                                                    onChange={(e) => updateTeamColor(team.id, e.target.value)}
+                                                                    className="w-16 h-8 rounded cursor-pointer"
+                                                                />
+                                                                <button
+                                                                    onClick={() => removeTeam(team.id)}
+                                                                    className="px-3 py-1 bg-red-500 text-white rounded-lg text-sm font-bold"
+                                                                >
+                                                                    🗑️ Buang
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    ) : (
+                                                        <h3 className="font-black text-lg sm:text-xl truncate" style={{ color: team.color }}>
+                                                            {team.name}
+                                                        </h3>
+                                                    )}
+                                                </div>
+
+                                                <div className="text-right flex-shrink-0">
+                                                    <div className="text-3xl sm:text-4xl font-black" style={{ color: team.color }}>
+                                                        {team.score}
+                                                    </div>
+                                                    <div className="text-xs text-gray-500 font-semibold">POINTS</div>
+                                                </div>
+                                            </div>
+
+                                            <div className="w-full bg-gray-200 rounded-full h-3 mb-3 overflow-hidden">
+                                                <div
+                                                    className="h-full rounded-full transition-all duration-500"
+                                                    style={{
+                                                        width: `${maxScore > 0 ? (team.score / maxScore) * 100 : 0}%`,
+                                                        background: team.color
+                                                    }}
+                                                />
+                                            </div>
+
+                                            <div className="flex gap-2 justify-center flex-wrap">
+                                                <button
+                                                    onClick={() => addPoints(team.id, -1)}
+                                                    disabled={team.score === 0}
+                                                    className="p-2 bg-red-100 active:bg-red-200 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed font-bold text-lg min-w-[44px]"
+        
