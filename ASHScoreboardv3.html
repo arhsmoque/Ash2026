@@ -3,459 +3,352 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>ASH 2026 Scoreboard - Universal</title>
+    <title>Ramadhan Tracker</title>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <style>
-        @keyframes pulse-glow {
-            0%, 100% { box-shadow: 0 0 20px rgba(0, 255, 0, 0.5); }
-            50% { box-shadow: 0 0 30px rgba(0, 255, 0, 0.8); }
-        }
-        @keyframes blink {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.3; }
-        }
-        .live-dot {
-            animation: blink 1.5s infinite;
-        }
-        .live-indicator {
-            animation: pulse-glow 2s infinite;
-        }
-        /* iPad specific fixes */
-        button {
-            touch-action: manipulation;
-            -webkit-tap-highlight-color: transparent;
-        }
-        input, button {
-            font-size: 16px; /* Prevents zoom on focus in iOS */
-        }
+        button { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+        input, button, select { font-size: 16px; }
+        @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+        .floating { animation: float 3s ease-in-out infinite; }
     </style>
 </head>
 <body>
     <div id="root"></div>
-
-    <script type="text/babel">
+    <script>
         const { useState, useEffect, useCallback } = React;
-
-        // ==========================================
-        // UNIVERSAL STORAGE WRAPPER - iPad Hardened
-        // ==========================================
-        class UniversalStorage {
-            constructor() {
-                this.mode = 'memory';
-                this.memoryStorage = {};
-                this.storageAvailable = false;
-                this.detectStorage();
-            }
-
-            detectStorage() {
-                try {
-                    // Test localStorage by actually writing to it
-                    // This catches Safari Private Browsing QuotaExceededError
-                    const testKey = '__storage_test__';
-                    window.localStorage.setItem(testKey, '1');
-                    window.localStorage.removeItem(testKey);
-                    this.storageAvailable = true;
-                    this.mode = 'local';
-                    console.log('✅ localStorage available');
-                } catch (e) {
-                    // Safari Private Browsing throws QuotaExceededError here
-                    console.warn('⚠️ localStorage not available:', e.message);
-                    this.storageAvailable = false;
-                    this.mode = 'memory';
-                }
-            }
-
-            get(key) {
-                try {
-                    if (this.mode === 'local' && this.storageAvailable) {
-                        const value = window.localStorage.getItem(key);
-                        return value ? { key, value } : null;
-                    } else {
-                        const value = this.memoryStorage[key];
-                        return value ? { key, value } : null;
-                    }
-                } catch (error) {
-                    console.error('GET error:', error);
-                    // Fallback to memory on error
-                    const value = this.memoryStorage[key];
-                    return value ? { key, value } : null;
-                }
-            }
-
-            set(key, value) {
-                try {
-                    if (this.mode === 'local' && this.storageAvailable) {
-                        window.localStorage.setItem(key, value);
-                        return { key, value };
-                    } else {
-                        this.memoryStorage[key] = value;
-                        return { key, value };
-                    }
-                } catch (error) {
-                    // If localStorage fails (e.g. quota exceeded), fallback to memory
-                    console.error('SET error, falling back to memory:', error);
-                    this.mode = 'memory';
-                    this.storageAvailable = false;
-                    this.memoryStorage[key] = value;
-                    return { key, value };
-                }
-            }
-        }
-
-        // Initialize storage
-        const storage = new UniversalStorage();
-
-        // ==========================================
-        // MAIN SCOREBOARD COMPONENT
-        // ==========================================
-        function ASH2026Scoreboard() {
-            const [teams, setTeams] = useState([]);
-            const [editMode, setEditMode] = useState(false);
-            const [isLoading, setIsLoading] = useState(true);
-            const [error, setError] = useState(null);
-
-            const STORAGE_KEY = 'ash2026-scoreboard-data';
-
-            const defaultTeams = [
-                { id: 1, name: 'Team Pak Mok 🦅', color: '#4169E1', score: 0 },
-                { id: 2, name: 'Team Anjang 🦁', color: '#FFD700', score: 0 },
-                { id: 3, name: 'Team Mak Teh 🐯', color: '#FF6B6B', score: 0 },
-                { id: 4, name: 'Team Asilah 🦊', color: '#4ECDC4', score: 0 },
-                { id: 5, name: 'Team Diyana 🦺', color: '#95E1D3', score: 0 },
-                { id: 6, name: 'Team Fi Ali 🦌', color: '#F38181', score: 0 },
-                { id: 7, name: 'Team Pak Tam 🐻', color: '#AA96DA', score: 0 }
-            ];
-
-            const loadScoreboard = useCallback(() => {
-                try {
-                    const result = storage.get(STORAGE_KEY);
-                    
-                    if (result && result.value) {
-                        try {
-                            const parsedTeams = JSON.parse(result.value);
-                            if (Array.isArray(parsedTeams) && parsedTeams.length > 0) {
-                                setTeams(parsedTeams);
-                            } else {
-                                setTeams(defaultTeams);
-                            }
-                        } catch (parseErr) {
-                            console.error('Parse error:', parseErr);
-                            setTeams(defaultTeams);
-                        }
-                    } else {
-                        console.log('No saved data, using defaults');
-                        setTeams(defaultTeams);
-                        // Save defaults immediately
-                        storage.set(STORAGE_KEY, JSON.stringify(defaultTeams));
-                    }
-                    setError(null);
-                } catch (err) {
-                    console.error('Load error:', err);
-                    setTeams(defaultTeams);
-                } finally {
-                    setIsLoading(false);
-                }
-            }, []);
-
-            const saveScoreboard = useCallback((teamsData) => {
-                try {
-                    storage.set(STORAGE_KEY, JSON.stringify(teamsData));
-                    setError(null);
-                } catch (err) {
-                    console.error('Save error:', err);
-                    setError('Save failed');
-                }
-            }, []);
-
-            // Initial load
-            useEffect(() => {
-                loadScoreboard();
-            }, [loadScoreboard]);
-
-            const addPoints = (id, points) => {
-                const newTeams = teams.map(team => 
-                    team.id === id ? { ...team, score: Math.max(0, team.score + points) } : team
-                );
-                setTeams(newTeams);
-                saveScoreboard(newTeams);
-            };
-
-            const updateTeamName = (id, name) => {
-                const newTeams = teams.map(team =>
-                    team.id === id ? { ...team, name } : team
-                );
-                setTeams(newTeams);
-                saveScoreboard(newTeams);
-            };
-
-            const updateTeamColor = (id, color) => {
-                const newTeams = teams.map(team =>
-                    team.id === id ? { ...team, color } : team
-                );
-                setTeams(newTeams);
-                saveScoreboard(newTeams);
-            };
-
-            const removeTeam = (id) => {
-                // Use custom confirm for better iPad compatibility
-                if (window.confirm('Buang team ini?')) {
-                    const newTeams = teams.filter(t => t.id !== id);
-                    setTeams(newTeams);
-                    saveScoreboard(newTeams);
-                }
-            };
-
-            const addNewTeam = () => {
-                const newId = Math.max(...teams.map(t => t.id), 0) + 1;
-                const colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8', '#F7DC6F', '#BB8FCE'];
-                const randomColor = colors[Math.floor(Math.random() * colors.length)];
-                
-                const newTeams = [...teams, {
-                    id: newId,
-                    name: `Team Baru ${newId}`,
-                    color: randomColor,
-                    score: 0
-                }];
-                setTeams(newTeams);
-                saveScoreboard(newTeams);
-                setEditMode(true);
-            };
-
-            const resetScores = () => {
-                if (window.confirm('Reset semua skor ke 0?')) {
-                    const newTeams = teams.map(team => ({ ...team, score: 0 }));
-                    setTeams(newTeams);
-                    saveScoreboard(newTeams);
-                }
-            };
-
-            if (isLoading) {
-                return (
-                    <div className="min-h-screen flex items-center justify-center" style={{
-                        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
-                    }}>
-                        <div className="text-white text-2xl font-bold">🔄 Loading...</div>
-                    </div>
-                );
-            }
-
-            const sortedTeams = [...teams].sort((a, b) => b.score - a.score);
-            const maxScore = Math.max(...teams.map(t => t.score), 1);
-
-            return (
-                <div className="min-h-screen p-4 sm:p-6" style={{
-                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
-                }}>
-                    <div className="max-w-4xl mx-auto">
-                        <div className="relative text-center mb-8 bg-white/10 backdrop-blur-sm rounded-3xl p-6 shadow-2xl border-2 border-yellow-400">
-                            <div className="flex items-center justify-center gap-3 mb-2">
-                                <span className="text-4xl">⭐</span>
-                                <h1 className="text-4xl sm:text-5xl font-black text-white" style={{
-                                    textShadow: '3px 3px 0px rgba(0,0,0,0.3), -1px -1px 0px #FFD700'
-                                }}>
-                                    ASH 2026
-                                </h1>
-                                <span className="text-4xl">⭐</span>
-                            </div>
-                            <p className="text-yellow-200 font-bold text-lg">Family Day Scoreboard</p>
-                            <p className="text-white/80 text-sm">7-8 Feb 2026 • Villa Zahra, A'Famosa</p>
-                        </div>
-
-                        {error && (
-                            <div className="bg-red-500/80 text-white p-3 rounded-xl mb-4 text-center font-bold text-sm">
-                                {error}
-                            </div>
-                        )}
-
-                        <div className="flex gap-3 mb-6 flex-wrap justify-center">
-                            <button
-                                onClick={loadScoreboard}
-                                className="px-4 py-3 bg-blue-400 text-gray-900 rounded-xl font-bold shadow-lg transition-transform active:scale-95"
-                                style={{WebkitTapHighlightColor: 'transparent'}}
-                            >
-                                🔄 Refresh
-                            </button>
-                            <button
-                                onClick={() => setEditMode(!editMode)}
-                                className="px-4 py-3 rounded-xl font-bold shadow-lg transition-transform active:scale-95"
-                                style={{
-                                    background: editMode ? '#4ECDC4' : '#FFD700',
-                                    color: '#1a1a2e',
-                                    WebkitTapHighlightColor: 'transparent'
-                                }}
-                            >
-                                ⚙️ {editMode ? '✓ Selesai' : 'Edit'}
-                            </button>
-                            <button
-                                onClick={resetScores}
-                                className="px-4 py-3 bg-red-500 text-white rounded-xl font-bold shadow-lg transition-transform active:scale-95"
-                                style={{WebkitTapHighlightColor: 'transparent'}}
-                            >
-                                🔄 Reset
-                            </button>
-                            <button
-                                onClick={addNewTeam}
-                                className="px-4 py-3 bg-purple-600 text-white rounded-xl font-bold shadow-lg transition-transform active:scale-95"
-                                style={{WebkitTapHighlightColor: 'transparent'}}
-                            >
-                                ➕ Team
-                            </button>
-                        </div>
-
-                        <div className="space-y-4">
-                            {sortedTeams.map((team, index) => {
-                                const rankColor = index === 0 ? '#FFD700' : 
-                                                 index === 1 ? '#C0C0C0' : 
-                                                 index === 2 ? '#CD7F32' : team.color;
-                                const rankDisplay = index === 0 ? '🏆' : index + 1;
-
-                                return (
-                                    <div
-                                        key={team.id}
-                                        className="bg-white rounded-2xl shadow-xl overflow-hidden transform transition-all active:scale-95"
-                                        style={{ 
-                                            border: `3px solid ${team.color}`,
-                                            WebkitTapHighlightColor: 'transparent'
-                                        }}
-                                    >
-                                        <div className="p-4">
-                                            <div className="flex items-center gap-3 mb-3">
-                                                <div
-                                                    className="w-12 h-12 rounded-full flex items-center justify-center font-black text-xl shadow-lg flex-shrink-0"
-                                                    style={{
-                                                        background: rankColor,
-                                                        color: 'white',
-                                                        textShadow: '1px 1px 2px rgba(0,0,0,0.3)'
-                                                    }}
-                                                >
-                                                    {rankDisplay}
-                                                </div>
-
-                                                <div className="flex-1 min-w-0">
-                                                    {editMode ? (
-                                                        <div className="space-y-2">
-                                                            <input
-                                                                type="text"
-                                                                value={team.name}
-                                                                onChange={(e) => updateTeamName(team.id, e.target.value)}
-                                                                className="w-full px-3 py-2 border-2 rounded-lg font-bold text-lg"
-                                                                style={{ borderColor: team.color }}
-                                                            />
-                                                            <div className="flex gap-2 items-center flex-wrap">
-                                                                <input
-                                                                    type="color"
-                                                                    value={team.color}
-                                                                    onChange={(e) => updateTeamColor(team.id, e.target.value)}
-                                                                    className="w-16 h-8 rounded cursor-pointer"
-                                                                />
-                                                                <button
-                                                                    onClick={() => removeTeam(team.id)}
-                                                                    className="px-3 py-1 bg-red-500 text-white rounded-lg text-sm font-bold"
-                                                                >
-                                                                    🗑️ Buang
-                                                                </button>
-                                                            </div>
-                                                        </div>
-                                                    ) : (
-                                                        <h3 className="font-black text-lg sm:text-xl truncate" style={{ color: team.color }}>
-                                                            {team.name}
-                                                        </h3>
-                                                    )}
-                                                </div>
-
-                                                <div className="text-right flex-shrink-0">
-                                                    <div className="text-3xl sm:text-4xl font-black" style={{ color: team.color }}>
-                                                        {team.score}
-                                                    </div>
-                                                    <div className="text-xs text-gray-500 font-semibold">POINTS</div>
-                                                </div>
-                                            </div>
-
-                                            <div className="w-full bg-gray-200 rounded-full h-3 mb-3 overflow-hidden">
-                                                <div
-                                                    className="h-full rounded-full transition-all duration-500"
-                                                    style={{
-                                                        width: `${maxScore > 0 ? (team.score / maxScore) * 100 : 0}%`,
-                                                        background: team.color
-                                                    }}
-                                                />
-                                            </div>
-
-                                            <div className="flex gap-2 justify-center flex-wrap">
-                                                <button
-                                                    onClick={() => addPoints(team.id, -1)}
-                                                    disabled={team.score === 0}
-                                                    className="p-2 bg-red-100 active:bg-red-200 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed font-bold text-lg min-w-[44px]"
-                                                    style={{WebkitTapHighlightColor: 'transparent'}}
-                                                >
-                                                    ➖
-                                                </button>
-                                                <button
-                                                    onClick={() => addPoints(team.id, 1)}
-                                                    className="px-3 py-2 bg-green-100 active:bg-green-200 rounded-lg font-bold text-green-700 transition-colors min-w-[44px]"
-                                                    style={{WebkitTapHighlightColor: 'transparent'}}
-                                                >
-                                                    +1
-                                                </button>
-                                                <button
-                                                    onClick={() => addPoints(team.id, 5)}
-                                                    className="px-3 py-2 rounded-lg font-bold text-white transition-colors shadow-md active:brightness-90 min-w-[44px]"
-                                                    style={{ background: team.color, WebkitTapHighlightColor: 'transparent' }}
-                                                >
-                                                    +5
-                                                </button>
-                                                <button
-                                                    onClick={() => addPoints(team.id, 10)}
-                                                    className="px-3 py-2 bg-yellow-400 active:bg-yellow-500 rounded-lg font-bold text-gray-800 transition-colors shadow-md min-w-[44px]"
-                                                    style={{WebkitTapHighlightColor: 'transparent'}}
-                                                >
-                                                    +10
-                                                </button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                );
-                            })}
-                        </div>
-
-                        {sortedTeams[0]?.score > 0 && (
-                            <div className="mt-8 bg-gradient-to-r from-yellow-400 via-yellow-300 to-yellow-400 rounded-2xl p-6 text-center shadow-2xl">
-                                <div className="text-5xl mb-2">🏆</div>
-                                <h2 className="text-2xl font-black text-gray-800 mb-1">
-                                    🎉 KETUA CARTA! 🎉
-                                </h2>
-                                <p className="text-3xl font-black text-purple-700">
-                                    {sortedTeams[0].name}
-                                </p>
-                                <p className="text-xl font-bold text-gray-700 mt-2">
-                                    {sortedTeams[0].score} mata
-                                </p>
-                            </div>
-                        )}
-
-                        <div className="mt-8 text-center text-white/80 text-sm">
-                            <p className="font-semibold">Total Peserta: 35 orang (22 dewasa + 13 kanak-kanak)</p>
-                            <p className="mt-2">Selamat bersaing! May the best team win! 🏆</p>
-                        </div>
-                    </div>
-                </div>
-            );
-        }
-
-        // Use createRoot for React 18 compatibility
-        const container = document.getElementById('root');
-        const root = ReactDOM.createRoot ? ReactDOM.createRoot(container) : ReactDOM;
         
-        if (root.render) {
-            root.render(<ASH2026Scoreboard />);
-        } else {
-            ReactDOM.render(<ASH2026Scoreboard />, container);
+        const STORAGE_KEY = 'ramadhan-tracker-v2';
+        
+        // Default config - families can customize everything
+        const defaultConfig = {
+            year: 2026,
+            startDate: '2026-02-19', // 1 Ramadhan
+            endDate: '2026-03-20',   // 30 Ramadhan
+            currency: 'RM',
+            participants: [
+                { id: 1, name: 'Ahmad', age: 10, color: '#4169E1', 
+                  rules: { fullAmount: 2, fullLabel: 'Penuh (Maghrib)', 
+                           halfAmount: 1, halfLabel: 'Asar', 
+                           hasHalf: true } },
+                { id: 2, name: 'Aisyah', age: 8, color: '#FF69B4', 
+                  rules: { fullAmount: 2, fullLabel: 'Penuh (Maghrib)', 
+                           halfAmount: 1, halfLabel: 'Asar', 
+                           hasHalf: true } },
+                { id: 3, name: 'Fatimah', age: 5, color: '#FFD700', 
+                  rules: { fullAmount: 1, fullLabel: 'Zohor', 
+                           halfAmount: 0, halfLabel: '', 
+                           hasHalf: false } }
+            ],
+            history: {}
+        };
+
+        const colors = ['#4169E1', '#FF69B4', '#FFD700', '#22c55e', '#a855f7', '#f97316', '#06b6d4', '#ef4444'];
+
+        const storage = {
+            available: (() => { try { localStorage.setItem('t', '1'); localStorage.removeItem('t'); return true; } catch(e) { return false; } })(),
+            get: (k) => { try { return localStorage.getItem(k); } catch(e) { return null; } },
+            set: (k, v) => { try { localStorage.setItem(k, v); } catch(e) {} }
+        };
+
+        function formatDate(d) {
+            const date = new Date(d);
+            return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
         }
-    </script>
-</body>
-</html>
+
+        function getToday() { return formatDate(new Date()); }
+
+        function getDayNumber(dateStr, startDate) {
+            const d1 = new Date(startDate);
+            const d2 = new Date(dateStr);
+            const diff = Math.floor((d2 - d1) / (1000 * 60 * 60 * 24)) + 1;
+            return diff >= 1 && diff <= 30 ? diff : null;
+        }
+
+        function calculateEarnings(participant, history) {
+            const pid = participant.id;
+            const records = Object.values(history).filter(h => h.participantId === pid);
+            const full = records.filter(r => r.type === 'full').length;
+            const half = records.filter(r => r.type === 'half').length;
+            return (full * participant.rules.fullAmount) + (half * participant.rules.halfAmount);
+        }
+
+        function RamadhanTracker() {
+            const [config, setConfig] = useState(null);
+            const [history, setHistory] = useState({});
+            const [selectedDate, setSelectedDate] = useState(getToday());
+            const [view, setView] = useState('tracker'); // tracker, history, settings, summary
+            const [loading, setLoading] = useState(true);
+            const [editingParticipant, setEditingParticipant] = useState(null);
+
+            useEffect(() => {
+                const saved = storage.get(STORAGE_KEY);
+                if (saved) {
+                    try {
+                        const parsed = JSON.parse(saved);
+                        setConfig({ ...defaultConfig, ...parsed.config });
+                        setHistory(parsed.history || {});
+                    } catch(e) {
+                        setConfig(defaultConfig);
+                        setHistory({});
+                    }
+                } else {
+                    setConfig(defaultConfig);
+                    setHistory({});
+                }
+                setLoading(false);
+            }, []);
+
+            const save = useCallback((newConfig, newHistory) => {
+                const cfg = newConfig || config;
+                const hist = newHistory || history;
+                storage.set(STORAGE_KEY, JSON.stringify({ config: cfg, history: hist }));
+            }, [config, history]);
+
+            const recordFast = (participantId, type) => {
+                const key = `${selectedDate}_${participantId}`;
+                const newHistory = { ...history };
+                
+                if (type === 'none') {
+                    delete newHistory[key];
+                } else {
+                    newHistory[key] = { date: selectedDate, participantId, type };
+                }
+                
+                setHistory(newHistory);
+                save(null, newHistory);
+            };
+
+            const getRecord = (participantId) => {
+                return history[`${selectedDate}_${participantId}`]?.type || 'none';
+            };
+
+            const addParticipant = () => {
+                const newId = Math.max(...config.participants.map(p => p.id), 0) + 1;
+                const newParticipant = {
+                    id: newId,
+                    name: `Anak ${newId}`,
+                    age: 7,
+                    color: colors[newId % colors.length],
+                    rules: { fullAmount: 2, fullLabel: 'Penuh', halfAmount: 1, halfLabel: 'Asar', hasHalf: true }
+                };
+                const newConfig = { ...config, participants: [...config.participants, newParticipant] };
+                setConfig(newConfig);
+                save(newConfig, null);
+                setEditingParticipant(newParticipant);
+            };
+
+            const updateParticipant = (id, updates) => {
+                const newParticipants = config.participants.map(p => p.id === id ? { ...p, ...updates } : p);
+                const newConfig = { ...config, participants: newParticipants };
+                setConfig(newConfig);
+                save(newConfig, null);
+            };
+
+            const removeParticipant = (id) => {
+                if (!confirm(`Buang ${config.participants.find(p => p.id === id)?.name}?`)) return;
+                const newParticipants = config.participants.filter(p => p.id !== id);
+                const newHistory = Object.fromEntries(Object.entries(history).filter(([k, v]) => v.participantId !== id));
+                const newConfig = { ...config, participants: newParticipants };
+                setConfig(newConfig);
+                setHistory(newHistory);
+                save(newConfig, newHistory);
+            };
+
+            const updateConfig = (updates) => {
+                const newConfig = { ...config, ...updates };
+                setConfig(newConfig);
+                save(newConfig, null);
+            };
+
+            const resetAll = () => {
+                if (!confirm('Reset SEMUA data? Ini akan hapus semua rekod dan tetapan!')) return;
+                setConfig(defaultConfig);
+                setHistory({});
+                save(defaultConfig, {});
+            };
+
+            const exportData = () => {
+                const data = JSON.stringify({ config, history, exported: new Date().toISOString() }, null, 2);
+                const blob = new Blob([data], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `ramadhan-tracker-${config.year}.json`;
+                a.click();
+            };
+
+            const importData = (file) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const data = JSON.parse(e.target.result);
+                        if (data.config) {
+                            setConfig(data.config);
+                            setHistory(data.history || {});
+                            save(data.config, data.history || {});
+                            alert('Data imported successfully!');
+                        }
+                    } catch(err) {
+                        alert('Invalid file format');
+                    }
+                };
+                reader.readAsText(file);
+            };
+
+            if (loading || !config) return React.createElement('div', { className: 'min-h-screen flex items-center justify-center bg-gradient-to-br from-emerald-800 to-emerald-600' }, 
+                React.createElement('div', { className: 'text-white text-2xl font-bold' }, '🌙 Loading...')
+            );
+
+            const dayNum = getDayNumber(selectedDate, config.startDate);
+            const isRamadhan = dayNum !== null;
+
+            // Views
+            const renderTracker = () => {
+                return React.createElement('div', { className: 'space-y-4' }, 
+                    config.participants.map(p => {
+                        const record = getRecord(p.id);
+                        const earnings = calculateEarnings(p, history);
+                        const totalDays = Object.values(history).filter(h => h.participantId === p.id && h.type !== 'none').length;
+                        const progress = Math.min((totalDays / 30) * 100, 100);
+                        
+                        return React.createElement('div', {
+                            key: p.id,
+                            className: 'bg-white rounded-2xl shadow-xl overflow-hidden',
+                            style: { border: `4px solid ${p.color}` }
+                        }, [
+                            React.createElement('div', { key: 'header', className: 'p-4', style: { background: `${p.color}15` } }, [
+                                React.createElement('div', { key: 'top', className: 'flex items-center justify-between mb-3' }, [
+                                    React.createElement('div', { key: 'name', className: 'flex items-center gap-3' }, [
+                                        React.createElement('div', {
+                                            className: 'w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-xl',
+                                            style: { background: p.color }
+                                        }, p.name.charAt(0)),
+                                        React.createElement('div', {}, [
+                                            React.createElement('h3', { className: 'font-black text-xl', style: { color: p.color } }, p.name),
+                                            React.createElement('p', { className: 'text-xs text-gray-500' }, `${p.age} tahun • ${totalDays} hari`)
+                                        ])
+                                    ]),
+                                    React.createElement('div', { key: 'money', className: 'text-right' }, [
+                                        React.createElement('div', { className: 'text-3xl font-black text-green-600' }, `${config.currency}${earnings}`),
+                                        React.createElement('div', { className: 'text-xs text-gray-500 font-bold' }, 'JUMLAH')
+                                    ])
+                                ]),
+                                
+                                React.createElement('div', { key: 'progress', className: 'w-full bg-gray-200 rounded-full h-3 mb-3' },
+                                    React.createElement('div', {
+                                        className: 'h-full rounded-full transition-all',
+                                        style: { width: `${progress}%`, background: p.color }
+                                    })
+                                )
+                            ]),
+                            
+                            React.createElement('div', { key: 'buttons', className: 'p-4 bg-gray-50 border-t-2 border-gray-200' }, [
+                                React.createElement('p', { key: 'label', className: 'text-sm font-bold text-gray-600 mb-2 text-center' },
+                                    `${formatDateDisplay(selectedDate)} ${dayNum ? `(Hari ${dayNum})` : ''}`
+                                ),
+                                React.createElement('div', { key: 'row', className: 'flex gap-2' }, [
+                                    React.createElement('button', {
+                                        onClick: () => recordFast(p.id, 'none'),
+                                        className: `flex-1 py-3 rounded-xl font-bold ${record === 'none' ? 'bg-red-500 text-white' : 'bg-gray-200 text-gray-600'}`
+                                    }, '❌ Tak Puasa'),
+                                    
+                                    React.createElement('button', {
+                                        onClick: () => recordFast(p.id, 'full'),
+                                        className: `flex-1 py-3 rounded-xl font-bold ${record === 'full' ? 'bg-green-500 text-white' : 'bg-green-100 text-green-700'}`
+                                    }, `${p.rules.fullLabel} (${config.currency}${p.rules.fullAmount})`),
+                                    
+                                    p.rules.hasHalf ? React.createElement('button', {
+                                        onClick: () => recordFast(p.id, 'half'),
+                                        className: `flex-1 py-3 rounded-xl font-bold ${record === 'half' ? 'bg-yellow-500 text-white' : 'bg-yellow-100 text-yellow-700'}`
+                                    }, `${p.rules.halfLabel} (${config.currency}${p.rules.halfAmount})`) : null
+                                ])
+                            ])
+                        ]);
+                    })
+                );
+            };
+
+            const renderSettings = () => {
+                if (editingParticipant) {
+                    const p = editingParticipant;
+                    return React.createElement('div', { className: 'bg-white rounded-2xl p-6 shadow-xl space-y-4' }, [
+                        React.createElement('h2', { key: 'title', className: 'text-2xl font-black text-emerald-800' }, `Edit: ${p.name}`),
+                        
+                        React.createElement('div', { key: 'name', className: 'space-y-2' }, [
+                            React.createElement('label', { className: 'font-bold text-gray-700' }, 'Nama'),
+                            React.createElement('input', {
+                                type: 'text',
+                                value: p.name,
+                                onChange: (e) => setEditingParticipant({ ...p, name: e.target.value }),
+                                className: 'w-full p-3 border-2 rounded-lg'
+                            })
+                        ]),
+                        
+                        React.createElement('div', { key: 'age', className: 'space-y-2' }, [
+                            React.createElement('label', { className: 'font-bold text-gray-700' }, 'Umur'),
+                            React.createElement('input', {
+                                type: 'number',
+                                value: p.age,
+                                onChange: (e) => setEditingParticipant({ ...p, age: parseInt(e.target.value) || 0 }),
+                                className: 'w-full p-3 border-2 rounded-lg'
+                            })
+                        ]),
+                        
+                        React.createElement('div', { key: 'color', className: 'space-y-2' }, [
+                            React.createElement('label', { className: 'font-bold text-gray-700' }, 'Warna'),
+                            React.createElement('input', {
+                                type: 'color',
+                                value: p.color,
+                                onChange: (e) => setEditingParticipant({ ...p, color: e.target.value }),
+                                className: 'w-full h-12 rounded-lg'
+                            })
+                        ]),
+                        
+                        React.createElement('div', { key: 'rules', className: 'space-y-3 border-t-2 pt-4' }, [
+                            React.createElement('h3', { className: 'font-bold text-emerald-700' }, 'Peraturan Ganjaran'),
+                            
+                            React.createElement('div', { className: 'space-y-2' }, [
+                                React.createElement('label', { className: 'text-sm font-bold text-gray-600' }, 'Label Penuh'),
+                                React.createElement('input', {
+                                    type: 'text',
+                                    value: p.rules.fullLabel,
+                                    onChange: (e) => setEditingParticipant({ ...p, rules: { ...p.rules, fullLabel: e.target.value } }),
+                                    className: 'w-full p-2 border rounded'
+                                })
+                            ]),
+                            
+                            React.createElement('div', { className: 'space-y-2' }, [
+                                React.createElement('label', { className: 'text-sm font-bold text-gray-600' }, `Ganjaran Penuh (${config.currency})`),
+                                React.createElement('input', {
+                                    type: 'number',
+                                    value: p.rules.fullAmount,
+                                    onChange: (e) => setEditingParticipant({ ...p, rules: { ...p.rules, fullAmount: parseFloat(e.target.value) || 0 } }),
+                                    className: 'w-full p-2 border rounded'
+                                })
+                            ]),
+                            
+                            React.createElement('div', { className: 'flex items-center gap-2' }, [
+                                React.createElement('input', {
+                                    type: 'checkbox',
+                                    checked: p.rules.hasHalf,
+                                    onChange: (e) => setEditingParticipant({ ...p, rules: { ...p.rules, hasHalf: e.target.checked } }),
+                                    id: 'hasHalf'
+                                }),
+                                React.createElement('label', { htmlFor: 'hasHalf', className: 'font-bold text-gray-700' }, 'Ada ganjaran separuh?')
+                            ]),
+                            
+                            p.rules.hasHalf ? React.createElement('div', { className: 'space-y-2 pl-6' }, [
+                                React.createElement('input', {
+                                    type: 'text',
+                                    value: p.rules.halfLabel,
+                                    onChange: (e) => setEditingParticipant({ ...p, rules: { ...p.rules, halfLabel: e.target.value } }),
+                                    className: 'w-full p-2 border rounded',
+                                    placeholder: 'Label (contoh: Asar)'
+                                }),
+                                React.createElement('input', {
+                                    type: 'number',
+                                    value: p.rules.halfAmount,
+                                    onChange: (e) => setEditingParticipant({ ...p, rules: { ...p.rules, halfAmount: parseFloat(e.target.value) || 0 } }),
+                            
